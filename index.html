@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>PayPal AI Demo</title>
+    <link rel="stylesheet" href="/static/style.css" />
+    <script src="https://www.paypal.com/sdk/js?client-id={{ client_id }}&currency=USD"></script>
+</head>
+<body>
+    <div class="chat-container">
+        <h1>🛒 AI Shopping Assistant</h1>
+        <div id="messages" class="messages"></div>
+        <input id="userInput" type="text" placeholder="Ask for a product..." />
+        <button id="sendBtn">Send</button>
+    </div>
+    <script>
+        const messagesDiv = document.getElementById('messages');
+        const input = document.getElementById('userInput');
+        const sendBtn = document.getElementById('sendBtn');
+        let lastProduct = null; // store AI suggestion
+
+        function addMessage(text, from = 'user') {
+            const msg = document.createElement('div');
+            msg.className = `message ${from}`;
+            msg.textContent = text;
+            messagesDiv.appendChild(msg);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        async function sendMessage() {
+            const userMsg = input.value.trim();
+            if (!userMsg) return;
+            addMessage(userMsg, 'user');
+            input.value = '';
+            const resp = await fetch('/api/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message: userMsg })
+            });
+            const data = await resp.json();
+            const reply = data.reply;
+            addMessage(reply, 'assistant');
+            // Try to parse JSON from reply
+            try {
+                const prod = JSON.parse(reply);
+                lastProduct = prod;
+                renderBuyButton(prod.price);
+            } catch (e) {
+                // not a product JSON – ignore
+                lastProduct = null;
+            }
+        }
+
+        function renderBuyButton(amount) {
+            // Remove any existing button
+            const oldBtn = document.getElementById('paypal-button');
+            if (oldBtn) oldBtn.remove();
+            const div = document.createElement('div');
+            div.id = 'paypal-button';
+            messagesDiv.appendChild(div);
+            paypal.Buttons({
+                createOrder: function () {
+                    return fetch('/api/create-order', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ amount })
+                    })
+                    .then(res => res.json())
+                    .then(data => data.orderID);
+                },
+                onApprove: function (data) {
+                    return fetch('/api/capture-order', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ orderID: data.orderID })
+                    })
+                    .then(res => res.json())
+                    .then(details => {
+                        addMessage('✅ Payment completed! Order status: ' + details.status, 'assistant');
+                    });
+                }
+            }).render('#paypal-button');
+        }
+
+        sendBtn.addEventListener('click', sendMessage);
+        input.addEventListener('keypress', e => { if (e.key === 'Enter') sendMessage(); });
+    </script>
+</body>
+</html>
